@@ -13,10 +13,12 @@ static const char *Version[] = {
 	(const char*)0
 	};
 
+#include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
+#include <unistd.h>
 
 #include <libusb-1.0/libusb.h>
 
@@ -168,7 +170,11 @@ AlienFxType_t AlienFxTypes[] = {
 	{ 0x187c, 0x512, "allpowerful", 100000,  /* delay not yet verified */
 	  LightsAllPowerful, sizeof LightsAllPowerful / sizeof *LightsAllPowerful },
 	{ 0x187c, 0x513, "aurora", 2500, /* ~R2 0µs; R4-ALX ≥2265µs */
-	  LightsAurora, sizeof LightsAurora / sizeof *LightsAurora }
+	  LightsAurora, sizeof LightsAurora / sizeof *LightsAurora },
+	{ 0x187c, 0x518, "m18x", 2500, /* nothing much verified yet */
+	  LightsM11x, sizeof LightsAurora / sizeof *LightsAurora },
+	{ 0x187c, 0x524, "m17x", 2500, /* nothing much verified yet */
+	  LightsAllPowerful, sizeof LightsAllPowerful / sizeof *LightsAllPowerful }
 };
 int AlienFxTypesCount = sizeof AlienFxTypes / sizeof AlienFxTypes[0];
 
@@ -275,12 +281,10 @@ int InitDevice(AlienFxType_t *all, AlienFxHandle_t *fxh)
 	if(0 == libusb_init( & fxh->usb_context))	{
 		libusb_set_debug(fxh->usb_context, 3);
 		int i;
-		for(i = 0 ; i < AlienFxTypesCount ; ++i) {
-			if(succp)
-				break;
+		for(i = 0 ; (i < AlienFxTypesCount) && ! succp ; ++i) {
 			AlienFxType_t *fxtype = &all[i];
 			if(verbose)
-				printf("scanning for AlienFX type \"%s\"...\n", fxtype->name);
+				printf("scanning for AlienFX type \"%s\"... ", fxtype->name);
 			if(fxh->usb_handle =
 			   libusb_open_device_with_vid_pid(fxh->usb_context,
 											   fxtype->idVendor,
@@ -288,9 +292,10 @@ int InitDevice(AlienFxType_t *all, AlienFxHandle_t *fxh)
 			{
 				fxh->info = fxtype;
 				if(verbose)
-					printf("found AlienFX type \"%s\"...\n", fxh->info->name);
+					printf("found \"%s\".\n", fxh->info->name);
 				succp = 1;
-			}
+			} else if(verbose)
+				puts("no.");
 		}
 		if(fxh->usb_handle) {
 			Detach(fxh->usb_handle);
@@ -298,38 +303,9 @@ int InitDevice(AlienFxType_t *all, AlienFxHandle_t *fxh)
 				perror("libusb_claim_interface");
 				fxh->usb_handle = 0;
 			}
-		} else perror("libusb_open_device_with_vid_pid");
-
+		}
 	} else perror("libusb_init");
 	return succp;
-}
-
-int InitDeviceOld(libusb_device_handle **alienfx_return)
-{
-	int alienfx_pid = 0x513;
-	int alienfx_vid = 0x187c;
-	libusb_context       *context = 0;
-	libusb_device_handle *alienfx = 0;
-
-	*alienfx_return = 0;		// assume failure 
-	libusb_init(&context);
-	libusb_set_debug(context, 3);
-
-	if( ! (alienfx = libusb_open_device_with_vid_pid(context,
-													 alienfx_vid,
-													 alienfx_pid)))
-	{
-		perror("libusb_open_device_with_vid_pid");
-		exit(1);
-	}
-
-	Detach(alienfx);
-	if(0 > libusb_claim_interface(alienfx, 0)) {
-		perror("libusb_claim_interface");
-		alienfx = 0;
-	}
-	*alienfx_return = alienfx;
-	return alienfx ? 1 : 0;
 }
 
 void ReleaseDevice(AlienFxHandle_t *fx)
@@ -572,7 +548,7 @@ int main(int ac, char **av)
 {
     int succp = 1;
 	Progname = av[0];
-	AlienFxHandle_t fx;
+	AlienFxHandle_t fx = {0,};  // relying on the compiler to obviate memset.
 	int ai = 1;
 	while(av[ai] && ('-' == av[ai][0]) && (1 < strlen(av[ai]))) {
 		// a simple "-" is handled later
@@ -603,7 +579,8 @@ int main(int ac, char **av)
             succp = Command( & fx, & av[ai]);
         }
         ReleaseDevice( & fx);
-	}
+	} else 
+		fputs("No recognized AlienFX device found.\n", stderr);
 
     return succp ? 0 : -1;
 }
